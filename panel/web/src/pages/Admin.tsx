@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type PanelUser, type InstanceWithStatus } from '../api';
 import { useUI, PasswordInput } from '../ui';
+
+const BUSY_PHASES = ['downloading', 'extracting', 'installing'];
 
 export default function Admin() {
   const nav = useNavigate();
@@ -16,8 +18,10 @@ export default function Admin() {
   const [resetTarget, setResetTarget] = useState<PanelUser | null>(null); // 重置密码弹窗
   const [deleteInst, setDeleteInst] = useState<InstanceWithStatus | null>(null); // 删除实例弹窗
   const [renameInst, setRenameInst] = useState<InstanceWithStatus | null>(null); // 重命名实例弹窗
+  const [starting, setStarting] = useState<Set<string>>(new Set());
 
   const subs = users.filter((u) => u.role !== 'admin');
+  const timer = useRef<number | undefined>(undefined);
 
   const load = async () => {
     try {
@@ -31,7 +35,48 @@ export default function Admin() {
 
   useEffect(() => {
     load();
+    return () => window.clearTimeout(timer.current);
   }, []);
+
+  // 安装/更新进行中时轮询进度
+  useEffect(() => {
+    window.clearTimeout(timer.current);
+    if (instances.some((i) => BUSY_PHASES.includes(i.wechat.phase))) timer.current = window.setTimeout(load, 1500);
+    return () => window.clearTimeout(timer.current);
+  }, [instances]);
+
+  const trigger = async (inst: InstanceWithStatus, kind: 'install' | 'update') => {
+    try {
+      await (kind === 'install' ? api.instanceWechatInstall(inst.id) : api.instanceWechatUpdate(inst.id));
+      setInstances((list) =>
+        list.map((i) =>
+          i.id === inst.id ? { ...i, wechat: { ...i.wechat, phase: 'downloading', percent: -1, message: '正在准备…' } } : i,
+        ),
+      );
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(load, 1000);
+      toast(kind === 'install' ? '已开始下载微信' : '已开始更新', 'ok');
+    } catch (e: any) {
+      toast(e.message || '操作失败', 'error');
+    }
+  };
+
+  const start = async (inst: InstanceWithStatus) => {
+    setStarting((s) => new Set(s).add(inst.id));
+    try {
+      await api.instanceStart(inst.id);
+      toast('实例已启动', 'ok');
+      await load();
+    } catch (e: any) {
+      toast(e.message || '启动失败', 'error');
+    } finally {
+      setStarting((s) => {
+        const n = new Set(s);
+        n.delete(inst.id);
+        return n;
+      });
+    }
+  };
 
   const instName = (id: string) => instances.find((i) => i.id === id)?.name || id;
   const usersForInstance = (id: string) => subs.filter((u) => u.allowedInstances.includes(id));
@@ -76,28 +121,27 @@ export default function Admin() {
             + 新建实例
           </button>
         </div>
-        <div className="list">
-          {instances.length === 0 && <div className="muted small" style={{ padding: '14px 16px' }}>暂无实例</div>}
-          {instances.map((inst) => (
-            <div key={inst.id} className="user-row">
-              <div className="user-main">
-                <span className="user-name">{inst.name}</span>
-                <span className="muted small">可访问账户 {usersForInstance(inst.id).length} 人</span>
-              </div>
-              <div className="user-actions">
-                <button className="btn-text" onClick={() => setRenameInst(inst)}>
-                  重命名
-                </button>
-                <button className="btn-text" onClick={() => setAssignInst(inst)}>
-                  分配账户
-                </button>
-                <button className="btn-text danger" onClick={() => setDeleteInst(inst)}>
-                  删除
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        {instances.length === 0 ? (
+          <div className="list">
+            <div className="muted small" style={{ padding: '14px 16px' }}>暂无实例</div>
+          </div>
+        ) : (
+          <div className="inst-grid">
+            {instances.map((inst) => (
+              <InstanceAdminCard
+                key={inst.id}
+                inst={inst}
+                userCount={usersForInstance(inst.id).length}
+                starting={starting.has(inst.id)}
+                onTrigger={trigger}
+                onStart={() => start(inst)}
+                onRename={() => setRenameInst(inst)}
+                onAssign={() => setAssignInst(inst)}
+                onDelete={() => setDeleteInst(inst)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="section-row" style={{ marginTop: 22 }}>
           <span className="section-title">子账号</span>
@@ -337,6 +381,96 @@ function DeleteInstance({ inst, onClose, onDone }: { inst: InstanceWithStatus; o
             {purge ? '连数据一起删除' : '删除实例'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 管理页的实例卡片：含微信版本管理（下载/更新）+ 重命名/分配/删除
+function InstanceAdminCard({
+  inst,
+  userCount,
+  starting,
+  onTrigger,
+  onStart,
+  onRename,
+  onAssign,
+  onDelete,
+}: {
+  inst: InstanceWithStatus;
+  userCount: number;
+  starting?: boolean;
+  onTrigger: (inst: InstanceWithStatus, kind: 'install' | 'update') => void;
+  onStart: () => void;
+  onRename: () => void;
+  onAssign: () => void;
+  onDelete: () => void;
+}) {
+  const wx = inst.wechat;
+  const busy = BUSY_PHASES.includes(wx.phase);
+  const installed = wx.installed && wx.phase !== 'downloading';
+  const offline = inst.runtime !== 'running';
+
+  let badge: { text: string; cls: string };
+  if (offline) badge = { text: inst.runtime === 'missing' ? '未创建' : '已停止', cls: 'tag-off' };
+  else if (busy) badge = { text: '处理中', cls: 'tag-busy' };
+  else if (installed) badge = { text: '在线', cls: 'tag-on' };
+  else badge = { text: '待安装', cls: 'tag-warn' };
+
+  let sub: string;
+  if (busy) sub = wx.percent >= 0 ? `${wx.message || '处理中'} ${wx.percent}%` : wx.message || '请稍候…';
+  else if (wx.phase === 'error') sub = wx.message || '操作失败，可重试';
+  else if (offline) sub = inst.runtime === 'missing' ? '容器尚未创建' : '容器已停止';
+  else if (installed) sub = wx.version ? `微信 ${wx.version}` : '微信已安装';
+  else sub = '微信尚未安装';
+
+  return (
+    <div className="inst-card">
+      <div className="inst-head">
+        <span className="inst-name">{inst.name}</span>
+        <span className={'tag ' + badge.cls}>{badge.text}</span>
+      </div>
+      <div className="inst-sub">
+        {sub} · 可访问 {userCount} 人
+      </div>
+
+      {busy && (
+        <div className="wx-progress">
+          <div
+            className={'wx-progress-bar' + (wx.percent < 0 ? ' indeterminate' : '')}
+            style={wx.percent >= 0 ? { width: `${wx.percent}%` } : undefined}
+          />
+        </div>
+      )}
+
+      {!busy && (
+        <div className="inst-actions">
+          {offline ? (
+            <button className="btn btn-primary inst-act-wide" disabled={starting} onClick={onStart}>
+              {starting ? '启动中…' : inst.runtime === 'missing' ? '创建并启动' : '启动实例'}
+            </button>
+          ) : installed ? (
+            <button className="btn btn-primary inst-act-wide" onClick={() => onTrigger(inst, 'update')}>
+              更新微信
+            </button>
+          ) : (
+            <button className="btn btn-primary inst-act-wide" onClick={() => onTrigger(inst, 'install')}>
+              下载安装微信
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="inst-admin-links">
+        <button className="btn-text" onClick={onRename}>
+          重命名
+        </button>
+        <button className="btn-text" onClick={onAssign}>
+          分配账户
+        </button>
+        <button className="btn-text danger" onClick={onDelete}>
+          删除
+        </button>
       </div>
     </div>
   );

@@ -39,25 +39,6 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer.current);
   }, [instances]);
 
-  const trigger = async (inst: InstanceWithStatus, kind: 'install' | 'update') => {
-    setErr('');
-    try {
-      await (kind === 'install' ? api.instanceWechatInstall(inst.id) : api.instanceWechatUpdate(inst.id));
-      setInstances(
-        (list) =>
-          list?.map((i) =>
-            i.id === inst.id ? { ...i, wechat: { ...i.wechat, phase: 'downloading', percent: -1, message: '正在准备…' } } : i,
-          ) ?? list,
-      );
-      window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(load, 1000);
-      toast(kind === 'install' ? '已开始下载微信' : '已开始更新', 'ok');
-    } catch (e: any) {
-      setErr(e.message || '操作失败');
-      toast(e.message || '操作失败', 'error');
-    }
-  };
-
   const start = async (inst: InstanceWithStatus) => {
     setErr('');
     setStarting((s) => new Set(s).add(inst.id));
@@ -133,7 +114,6 @@ export default function Dashboard() {
               isAdmin={isAdmin}
               starting={starting.has(inst.id)}
               onEnter={() => nav(`/desktop/${inst.id}`)}
-              onTrigger={trigger}
               onStart={() => start(inst)}
             />
           ))}
@@ -163,14 +143,12 @@ function InstanceCard({
   isAdmin,
   starting,
   onEnter,
-  onTrigger,
   onStart,
 }: {
   inst: InstanceWithStatus;
   isAdmin?: boolean;
   starting?: boolean;
   onEnter: () => void;
-  onTrigger: (inst: InstanceWithStatus, kind: 'install' | 'update') => void;
   onStart: () => void;
 }) {
   const wx = inst.wechat;
@@ -219,17 +197,6 @@ function InstanceCard({
           <button className="btn btn-primary inst-enter" disabled={!canEnter} onClick={onEnter}>
             进入微信
           </button>
-        )}
-        {isAdmin && !busy && !offline && (
-          installed ? (
-            <button className="btn inst-act" onClick={() => onTrigger(inst, 'update')}>
-              更新
-            </button>
-          ) : (
-            <button className="btn inst-act" onClick={() => onTrigger(inst, 'install')}>
-              下载安装
-            </button>
-          )
         )}
       </div>
     </div>
