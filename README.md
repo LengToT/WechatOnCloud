@@ -1,9 +1,54 @@
-# WechatOnCloud
+<div align="center">
 
-在飞牛 NAS（x86_64 / arm64）上运行服务端微信：可管理**多个**微信实例，每个实例是一个独立的微信会话；多个 web 用户通过浏览器访问被授权的实例，实现跨设备消息同步、多端共享。
+<img src="doc/img/icon-192.png" width="88" height="88" alt="云微 logo" />
 
-> 设计与选型详见 [技术方案.md](技术方案.md)。
-> 部署形态：拉取 GHCR 预构建多架构镜像（或本地自构建），面板按需动态创建微信实例容器。不熟悉 Docker？直接看 [Docker 运行模式详解](#docker-运行模式详解新手向)。
+<h1>云微 · WechatOnCloud</h1>
+
+<p><b>在自己的 NAS / 服务器上运行「服务端微信」，多端浏览器共享同一个微信会话</b></p>
+
+<p>
+  <a href="https://github.com/Gloridust/WechatOnCloud/stargazers"><img src="https://img.shields.io/github/stars/Gloridust/WechatOnCloud?style=flat-square&logo=github" alt="stars" /></a>
+  <a href="https://github.com/Gloridust/WechatOnCloud/releases"><img src="https://img.shields.io/github/v/release/Gloridust/WechatOnCloud?style=flat-square" alt="release" /></a>
+  <a href="https://github.com/Gloridust/WechatOnCloud/issues"><img src="https://img.shields.io/github/issues/Gloridust/WechatOnCloud?style=flat-square" alt="issues" /></a>
+  <img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-2496ED?style=flat-square&logo=docker&logoColor=white" alt="arch" />
+  <img src="https://img.shields.io/badge/PWA-ready-5A0FC8?style=flat-square" alt="pwa" />
+</p>
+
+<p>
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#核心特性">核心特性</a> ·
+  <a href="#docker-运行模式详解新手向">运行原理</a> ·
+  <a href="#安全须知必读">安全须知</a> ·
+  <a href="doc/技术方案.md">技术方案</a>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="doc/img/Screenshot-1.png" alt="云微 · 面板主界面" /></td>
+    <td width="50%"><img src="doc/img/Screenshot-2.png" alt="云微 · 实例桌面" /></td>
+  </tr>
+</table>
+
+</div>
+
+在飞牛 NAS（x86_64 / arm64）或任意 Docker 主机上运行服务端微信：可管理**多个**微信实例，每个实例是一个独立的微信会话；多个 web 用户通过浏览器访问被授权的实例，实现跨设备消息同步、多端共享。**不修改微信客户端。**
+
+> 设计与选型详见 [技术方案.md](doc/技术方案.md)。不熟悉 Docker？直接看 [Docker 运行模式详解](#docker-运行模式详解新手向)。
+
+---
+
+## 核心特性
+
+- 🗂️ **多实例** — 一个面板管理多个独立微信会话，每个实例独立容器 + 独立数据卷，互不干扰。
+- 👥 **多端共享 + 权限** — 多浏览器 / 设备共享同一会话；子账号体系，按账号分配可访问的实例（RBAC）。
+- 🖥️ **微信 PC 式界面** — 左侧实例栏 + 右侧内嵌桌面，侧栏可折叠，移动端自动转抽屉。
+- 📦 **微信本体运行时下载** — 镜像不打包微信，面板一键「下载安装 / 更新」带进度条；按 CPU 架构自动取包。
+- 🔁 **实例生命周期** — 启动 / 停止 / 重启 / 升级（拉新镜像重建、保留聊天记录），均在面板内一键完成。
+- 📎 **文件传输** — 原生拖拽上传 + 下载 + 删除，直达微信桌面 `~/Desktop`。
+- 🧩 **多端协作软锁** — 同一实例多人操作时自动只读 + 申请接管，避免键鼠打架。
+- 🔒 **安全优先** — 面板为唯一入口，KasmVNC 凭据服务端注入、永不下发前端；docker.sock 仅管理员可触达。
+- 📱 **PWA** — iOS「添加到主屏幕」、桌面 Chrome「安装」当原生 App。
+- 🏗️ **多架构** — amd64 / arm64 预构建镜像（GHCR + GitHub Actions 自动发布）。
 
 ---
 
@@ -248,7 +293,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ---
 
-## ⚠️ 安全须知（必读）
+## 安全须知（必读）
+
+> ⚠️ **这套系统暴露的是已登录的微信，请务必认真阅读本节。**
 
 这套系统暴露的是**已登录的微信**——能登录面板的人就能看聊天记录、以你身份发消息。**面板还挂载了宿主的 `docker.sock`**（创建/销毁实例所需），它等同宿主 root 权限。因此：
 
@@ -257,7 +304,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - 实例的增删、微信安装/更新等触碰 docker 引擎的操作**仅限管理员**；docker API 绝不暴露给前端；
 - KasmVNC 凭据由面板服务端注入，**浏览器永远拿不到**；实例容器名由内部随机 ID 派生，避免注入；
 - 面板与外网之间再套一层 HTTPS 反代（飞牛自带反代 / Caddy / Nginx）获得正经 TLS；
-- 进一步加固（陌生设备验证码、审计日志、并发控制）见 [技术方案.md](技术方案.md) 第 5 节。
+- 进一步加固（陌生设备验证码、审计日志、并发控制）见 [技术方案.md](doc/技术方案.md) 第 5 节。
 
 ---
 
@@ -321,19 +368,22 @@ WechatOnCloud/
 ├── .github/workflows/
 │   └── release.yml        # 打 tag / 发 Release 时构建多架构镜像并推送 GHCR
 ├── docker/                # 微信实例镜像（ghcr.io/<owner>/wechat-on-cloud）
-│   ├── Dockerfile         # KasmVNC base + 中文字体 + 微信运行时依赖 + 默认开 IME（不打包微信本体）
+│   ├── Dockerfile         # KasmVNC base + 中文字体 + 微信运行时依赖 + xdotool + 默认开 IME（不打包微信本体）
 │   ├── wechat-ctl.sh      # 运行时下载/解压/更新微信（面板经 docker exec 触发，状态写 /config/.woc-state）
-│   └── autostart          # openbox 会话启动：等待微信就绪 + 常驻拉起（含崩溃自重启）
+│   ├── autostart          # openbox 会话启动：常驻拉起微信（崩溃自重启）+ 最小化窗口自动复原看守
+│   └── woc-update-autostart  # 启动钩子：每次启动用镜像内最新 autostart 覆盖数据卷旧副本
 ├── panel/                 # 自研面板（ghcr.io/<owner>/woc-panel，唯一对外入口）
 │   ├── Dockerfile         # 前端 Vite 打包 + 后端 Fastify 网关（多架构）
-│   ├── server/            # Fastify：cookie 鉴权 + 账号/实例/权限 API + dockerode 管理实例 + 反代
-│   └── web/               # React + TS + PWA（牛奶布艺 + 微信绿主题）
+│   ├── server/            # Fastify：cookie 鉴权 + 账号/实例/权限/生命周期 API + dockerode + 反代
+│   └── web/               # React + TS + PWA（微信 PC 式布局，牛奶布艺 + 微信绿主题）
 ├── fnos/                  # 飞牛 fnOS 应用打包（.fpk 工程 + 构建说明）
 ├── scripts/
 │   └── build-local.sh     # 本地构建面板+微信镜像（发布前自测 / 自托管自构建）
+├── doc/                   # 文档与素材
+│   ├── 技术方案.md         # 完整设计文档
+│   └── img/               # logo 与界面截图
 ├── docker-compose.yml     # 单服务：panel（挂 docker.sock，按需创建实例）
 ├── .env.example           # 可选配置（账号密码、镜像版本、PUID/PGID、端口、时区）
-├── 技术方案.md            # 完整设计文档
 └── README.md
 ```
 
@@ -355,4 +405,24 @@ WechatOnCloud/
 
 ## 致谢
 
-创意启发自懒猫微服（原Deepin团队做的硬件产品），推荐有经济实力、追求稳定运营的朋友尝试！
+创意启发自懒猫微服（原 Deepin 团队做的硬件产品），推荐有经济实力、追求稳定运营的朋友尝试！
+
+也感谢每一位 Star / Issue / PR 的朋友——**两天突破 500 ⭐**，是继续打磨的最大动力 🙌
+
+## Star 趋势
+
+<a href="https://star-history.com/#Gloridust/WechatOnCloud&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Gloridust/WechatOnCloud&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Gloridust/WechatOnCloud&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Gloridust/WechatOnCloud&type=Date" />
+  </picture>
+</a>
+
+---
+
+<div align="center">
+<sub>如果这个项目帮到了你，欢迎点个 ⭐ Star 支持一下 ·
+<a href="https://github.com/Gloridust/WechatOnCloud/issues">反馈问题</a> ·
+<a href="https://github.com/Gloridust/WechatOnCloud/pulls">参与贡献</a></sub>
+</div>
