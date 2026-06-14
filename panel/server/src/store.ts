@@ -330,6 +330,23 @@ export function renameInstance(id: string, name: string) {
   return publicInstance(inst);
 }
 
+// 设置/清除实例自定义图标。传空 → 恢复按 appType 的默认图标。
+// 仅允许 builtin:<key> 或 data:image/...（裁剪后约 128px，限 ~225KB，防滥用撑大 accounts.json）。
+export function setInstanceIcon(id: string, icon: string | null) {
+  const inst = findInstance(id);
+  if (!inst) throw new Error('实例不存在');
+  const v = (icon ?? '').trim();
+  if (!v) {
+    delete inst.icon;
+  } else if (/^builtin:[a-z0-9_-]{1,32}$/.test(v) || (v.startsWith('data:image/') && v.length <= 300000)) {
+    inst.icon = v;
+  } else {
+    throw new Error('图标格式不合法或过大');
+  }
+  persist();
+  return publicInstance(inst);
+}
+
 export function removeInstance(id: string) {
   const inst = findInstance(id);
   if (!inst) throw new Error('实例不存在');

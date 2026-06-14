@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Cropper from 'react-easy-crop';
 import { api, APP_LABELS, appProfile, type PanelUser, type InstanceWithStatus, type VolEntry, type AppType } from '../api';
+import { InstanceIcon, ICON_CHOICES } from '../AppIcon';
 import { useUI, PasswordInput } from '../ui';
 import { useAuth } from '../auth';
 
@@ -95,6 +97,7 @@ export default function Admin({ onOpenMenu, onChangePassword }: { onOpenMenu: ()
   const [renameInst, setRenameInst] = useState<InstanceWithStatus | null>(null); // 重命名实例弹窗
   const [securityInst, setSecurityInst] = useState<InstanceWithStatus | null>(null); // 安全（内存阈值）弹窗
   const [volumeInst, setVolumeInst] = useState<InstanceWithStatus | null>(null); // 数据卷管理弹窗
+  const [iconInst, setIconInst] = useState<InstanceWithStatus | null>(null); // 图标编辑弹窗
   const [acting, setActing] = useState<Record<string, string>>({}); // 实例 id → 进行中的动作文案（启动中/升级中…）
   // 未使用的旧数据卷（来自之前删实例时未勾选"彻底清除"）：允许复用以继承聊天记录，或显式删除。
   const [orphanVols, setOrphanVols] = useState<{ name: string; createdAt?: string; sizeBytes?: number }[]>([]);
@@ -306,6 +309,7 @@ export default function Admin({ onOpenMenu, onChangePassword }: { onOpenMenu: ()
                     onDelete={() => setDeleteInst(inst)}
                     onSecurity={() => setSecurityInst(inst)}
                     onVolume={() => setVolumeInst(inst)}
+                    onIcon={() => setIconInst(inst)}
                   />
                 ))}
               </div>
@@ -530,6 +534,16 @@ export default function Admin({ onOpenMenu, onChangePassword }: { onOpenMenu: ()
       )}
       {volumeInst && (
         <VolumeManager inst={volumeInst} onClose={() => setVolumeInst(null)} onChanged={load} />
+      )}
+      {iconInst && (
+        <InstanceIconEditor
+          inst={iconInst}
+          onClose={() => setIconInst(null)}
+          onDone={() => {
+            toast('已更新图标', 'ok');
+            load();
+          }}
+        />
       )}
     </div>
   );
@@ -866,6 +880,7 @@ function InstanceAdminCard({
   onDelete,
   onSecurity,
   onVolume,
+  onIcon,
 }: {
   inst: InstanceWithStatus;
   userCount: number;
@@ -881,6 +896,7 @@ function InstanceAdminCard({
   onDelete: () => void;
   onSecurity: () => void;
   onVolume: () => void;
+  onIcon: () => void;
 }) {
   const wx = inst.wechat;
   const busy = BUSY_PHASES.includes(wx.phase);
@@ -997,6 +1013,9 @@ function InstanceAdminCard({
                   <button className="btn-text" onClick={onSecurity} title="内存阈值自愈">
                     安全
                   </button>
+                  <button className="btn-text" onClick={onIcon} title="设置实例图标：内置图标 / 上传图片裁剪">
+                    图标
+                  </button>
                   <button className="btn-text" onClick={onVolume} title="数据卷：备份/恢复、上传 PC 微信数据、文件管理">
                     数据卷
                   </button>
@@ -1014,6 +1033,132 @@ function InstanceAdminCard({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// 把裁剪区域画到 128px 画布并导出 PNG dataURL（存进 inst.icon）
+async function cropToDataUrl(src: string, area: { x: number; y: number; width: number; height: number }): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = src;
+  });
+  const SIZE = 128;
+  const c = document.createElement('canvas');
+  c.width = SIZE;
+  c.height = SIZE;
+  c.getContext('2d')!.drawImage(img, area.x, area.y, area.width, area.height, 0, 0, SIZE, SIZE);
+  return c.toDataURL('image/png');
+}
+
+// 实例图标编辑：选内置图标 / 上传图片裁剪 / 恢复默认。
+function InstanceIconEditor({ inst, onClose, onDone }: { inst: InstanceWithStatus; onClose: () => void; onDone: () => void }) {
+  const { toast } = useUI();
+  const [sel, setSel] = useState<string>(inst.icon || ''); // '' = 按应用默认
+  const [busy, setBusy] = useState(false);
+  const [cropSrc, setCropSrc] = useState(''); // 非空 = 裁剪态
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [area, setArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (!f.type.startsWith('image/')) return toast('请选择图片文件', 'error');
+    if (f.size > 8 * 1024 * 1024) return toast('图片过大（>8MB）', 'error');
+    const r = new FileReader();
+    r.onload = () => {
+      setCropSrc(String(r.result));
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+    };
+    r.readAsDataURL(f);
+  };
+
+  const confirmCrop = async () => {
+    if (!cropSrc || !area) return;
+    try {
+      setSel(await cropToDataUrl(cropSrc, area));
+      setCropSrc('');
+    } catch {
+      toast('裁剪失败', 'error');
+    }
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.setInstanceIcon(inst.id, sel || null);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast(e?.message || '保存失败', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="card modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <h2>图标 · {inst.name}</h2>
+        {cropSrc ? (
+          <>
+            <div className="icon-crop">
+              <Cropper
+                image={cropSrc}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                showGrid={false}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={(_, a) => setArea(a)}
+              />
+            </div>
+            <input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={() => setCropSrc('')}>返回</button>
+              <button type="button" className="btn btn-primary" onClick={confirmCrop}>裁剪并使用</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="icon-edit-top">
+              <InstanceIcon icon={sel || undefined} appType={inst.appType} size={56} radius={14} />
+              <div className="muted small">预览（{sel.startsWith('data:') ? '自定义图片' : sel.startsWith('builtin:') ? '内置图标' : '按应用默认'}）</div>
+            </div>
+            <div className="field-label">内置图标</div>
+            <div className="icon-grid">
+              <button type="button" className={'icon-pick' + (sel === '' ? ' sel' : '')} onClick={() => setSel('')}>
+                <InstanceIcon appType={inst.appType} size={38} radius={11} />
+                <span>默认</span>
+              </button>
+              {ICON_CHOICES.map((c) => (
+                <button
+                  type="button"
+                  key={c.key}
+                  className={'icon-pick' + (sel === `builtin:${c.key}` ? ' sel' : '')}
+                  onClick={() => setSel(`builtin:${c.key}`)}
+                >
+                  <InstanceIcon icon={`builtin:${c.key}`} size={38} radius={11} />
+                  <span>{c.label}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn" onClick={() => fileRef.current?.click()}>上传图片并裁剪…</button>
+            <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={onClose} disabled={busy}>取消</button>
+              <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>保存</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

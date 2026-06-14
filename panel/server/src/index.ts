@@ -26,6 +26,7 @@ import {
   createInstance,
   removeInstance as removeInstanceRecord,
   renameInstance,
+  setInstanceIcon,
   setInstanceUsers,
   publicInstance,
   APP_TYPES,
@@ -446,6 +447,17 @@ app.post('/api/admin/instances/:id/rename', async (req, reply) => {
     return { instance: renameInstance((req.params as any).id, String(name ?? '')) };
   } catch (e: any) {
     return reply.code(400).send({ error: e.message });
+  }
+});
+
+// 设置实例自定义图标（仅管理员）：icon = builtin:<key> / data:image 图片 / 空串(恢复默认)。
+app.post('/api/admin/instances/:id/icon', async (req, reply) => {
+  if (!requireAdmin(req, reply)) return;
+  const { icon } = (req.body as any) ?? {};
+  try {
+    return { instance: setInstanceIcon((req.params as any).id, typeof icon === 'string' ? icon : null) };
+  } catch (e: any) {
+    return reply.code(400).send({ error: e?.message || '设置图标失败' });
   }
 });
 

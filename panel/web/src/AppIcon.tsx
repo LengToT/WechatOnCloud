@@ -32,14 +32,41 @@ const dots = (
   </g>
 );
 
+// 文字字形（品牌色块 + 白字），用于没有简单标志的平台
+const txt = (s: string, fs = 22) => (
+  <text x="24" y="25" fill="#fff" fontSize={fs} fontWeight="700" textAnchor="middle" dominantBaseline="central" fontFamily="-apple-system, system-ui, sans-serif">
+    {s}
+  </text>
+);
+const play = <path fill="#fff" d="M20 17l12 7-12 7z" />;
+
 // key → 字形。default-by-appType 与「内置图标选择器」共用同一张表。
 export const BUILTIN_ICONS: Record<string, Glyph> = {
   wechat: G('#07c160', chat),
   chromium: G('#4285f4', globe),
   telegram: G('#2aabee', plane),
+  xiaohongshu: G('#ff2442', txt('书')),
+  douyin: G('#111111', txt('抖')),
+  bilibili: G('#fb7299', txt('B', 26)),
+  weibo: G('#e6162d', txt('微')),
+  zhihu: G('#0084ff', txt('知')),
+  youtube: G('#ff0000', play),
   globe: G('#5b8def', globe),
   app: G('#8a9099', dots),
 };
+// 「内置图标」选择器里展示的可选项（顺序即展示顺序）
+export const ICON_CHOICES: { key: string; label: string }[] = [
+  { key: 'wechat', label: '微信' },
+  { key: 'chromium', label: 'Chromium' },
+  { key: 'telegram', label: 'Telegram' },
+  { key: 'xiaohongshu', label: '小红书' },
+  { key: 'douyin', label: '抖音' },
+  { key: 'bilibili', label: 'B站' },
+  { key: 'weibo', label: '微博' },
+  { key: 'zhihu', label: '知乎' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'globe', label: '通用' },
+];
 const DEFAULT_BY_APP: Record<AppType, string> = {
   wechat: 'wechat',
   chromium: 'chromium',

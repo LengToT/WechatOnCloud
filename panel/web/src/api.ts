@@ -155,6 +155,8 @@ export const api = {
     req<{ containers: { id: string; name: string; status: string; volumeName?: string }[] }>('/api/admin/orphan-containers'),
   deleteOrphanContainer: (idOrName: string) =>
     req(`/api/admin/orphan-containers/${encodeURIComponent(idOrName)}`, { method: 'DELETE' }),
+  setInstanceIcon: (id: string, icon: string | null) =>
+    req<{ instance: PanelInstance }>(`/api/admin/instances/${id}/icon`, { method: 'POST', body: JSON.stringify({ icon }) }),
   renameInstance: (id: string, name: string) =>
     req<{ instance: PanelInstance }>(`/api/admin/instances/${id}/rename`, { method: 'POST', body: JSON.stringify({ name }) }),
   deleteInstance: (id: string, purge = false) =>
