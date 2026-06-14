@@ -409,12 +409,15 @@ async function execCapture(inst: Instance, cmd: string[]): Promise<string> {
   });
 }
 
-// 触发下载/安装（detached，立即返回，后台下载）。按实例 appType 分发：
-// app-ctl.sh wechat → 委托回 wechat-ctl.sh（微信逻辑零改动）；telegram 等各自实现。
+// 触发下载/安装（detached，立即返回，后台下载）。按实例 appType 分发：app-ctl.sh wechat → 委托回
+// wechat-ctl.sh；telegram 等各自实现。兼容旧容器（升级前镜像里没有 /woc/app-ctl.sh）：有则用之，无则
+// 回退老的 wechat-ctl.sh（旧实例都是微信）。appType 取值受 instanceAppType 约束，可安全内插进 shell。
 export async function triggerWechat(inst: Instance, cmd: 'install' | 'update'): Promise<void> {
   const c = docker.getContainer(inst.containerName);
+  const at = instanceAppType(inst);
+  const action = cmd === 'update' ? 'update' : 'install';
   const exec = await c.exec({
-    Cmd: ['/woc/app-ctl.sh', instanceAppType(inst), cmd === 'update' ? 'update' : 'install'],
+    Cmd: ['bash', '-c', `if [ -x /woc/app-ctl.sh ]; then /woc/app-ctl.sh ${at} ${action}; else /woc/wechat-ctl.sh ${action}; fi`],
     AttachStdout: false,
     AttachStderr: false,
     User: 'abc',
@@ -435,7 +438,13 @@ const DEFAULT_STATUS: WechatStatus = { phase: 'idle', percent: 0, installed: fal
 
 export async function wechatStatus(inst: Instance): Promise<WechatStatus> {
   try {
-    const raw = await execCapture(inst, ['/woc/app-ctl.sh', instanceAppType(inst), 'status']);
+    // 兼容旧容器（无 /woc/app-ctl.sh）：有则按 appType 取状态，无则回退老的 wechat-ctl.sh（旧实例皆微信）。
+    const at = instanceAppType(inst);
+    const raw = await execCapture(inst, [
+      'bash',
+      '-c',
+      `if [ -x /woc/app-ctl.sh ]; then /woc/app-ctl.sh ${at} status; else /woc/wechat-ctl.sh status; fi`,
+    ]);
     const json = JSON.parse(raw.trim());
     return { ...DEFAULT_STATUS, ...json };
   } catch {
